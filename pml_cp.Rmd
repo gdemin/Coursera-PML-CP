@@ -3,7 +3,13 @@ title: "PML Course project"
 output: html_document
 ---
 
+# Prediction of correctness of barbell lifting
 
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+### Donwloading and preparing data.
 
 ```{r}
 # Here we download and load data
@@ -20,27 +26,79 @@ if (!file.exists("data/pml-testing.csv")){
 pml_train = read.csv("data/pml-training.csv", header = TRUE)  
 pml_test = read.csv("data/pml-testing.csv", header = TRUE)
 
-summary(pml_train)
+# summary(pml_train)
 
 # There is some '#DIV/0!'. Thats why some numeric variables were incorrectly encoded as charaters. Below we correct them:
 
-cat("Train. Converted to numeric:")
+# cat("Train. Converted to numeric:")
 for (each in colnames(pml_train)) {
     curr_var = pml_train[,each]
     if (is.character(curr_var) & any(grepl('#DIV/0!',curr_var, fixed=TRUE))) {
-        cat (each," ")
-        pml_train[,each] = as.numeric(curr_var)
+#         cat (each," ")
+        pml_train[,each] = suppressWarnings(as.numeric(curr_var))
     }
 }  
-cat("\n")
-cat("Test. Converted to numeric:")
-for (each in colnames(pml_test)) {
-    curr_var = pml_test[,each]
-    if (is.character(curr_var) & any(grepl('#DIV/0!',curr_var, fixed=TRUE))) {
-        cat (each," ")
-        pml_test[,each] = as.numeric(curr_var)
-    }
-}  
-cat("\n")   
+ 
 ```
 
+From summary we can see that there is a lot of NA's in data. Let's quick summarize this NA's in percents of observations. Also we summarize number of unique values in each column. We don't need constants as predictors.
+
+```{r}
+    na_s = sapply(pml_train,function(each){ sum(is.na(each))})
+    uniqs = sapply(pml_train,function(each){ length(unique(each))})
+    data.frame('NAs, %' = na_s/nrow(pml_train)*100, Uniqs = uniqs) 
+
+```
+
+Further we drop columns with NA's, id, timestamps and windows. As part of preprocessing we convert variables 'classe' and 'user_name' to factors. 
+We keep user_name in model because there are persons with the same names in the test sample.  One may suppose that exercises dependent on personality.
+
+```{r}
+    w = pml_train[,na_s<1][,-c(1,3:7)]
+    w$classe = factor(w$classe)
+    w$user_name = factor(w$user_name)
+```
+
+### Modelling
+
+We have multicategorial dependent variable so we will use Random Forest classifier. It's work with nominal dependent variables and generally performs better than usual decision trees. We divide sample to training and testing samples in proportion 60/40.
+
+```{r, cache=TRUE}
+    library(caret)
+    set.seed(20141123)
+    inTrain = createDataPartition(w$classe, p = 0.6, list = FALSE)
+    w_training = w[ inTrain,]
+    w_testing = w[-inTrain,]
+    res_train = train(classe ~.,data=w_training,trControl = trainControl(method="oob"), method = "rf")
+    # prediction on training sample
+    pr_train = predict(res_train,newdata=w_training)
+    # prediction on testing sample
+    pr_test = predict(res_train,newdata = w_testing)
+    confusionMatrix(pr_train,w_training$classe) # errors on training sample
+    confusionMatrix(pr_test,w_testing$classe) # errors on testing sample
+    varImpPlot (res_train$finalModel,main="Variable importance")
+```
+
+So we can see 100% accuracy on training sample - it is obvious overfitting. But on testing sample we have 99% accuracy (out of sample error ~ 1%). I consider it as very good result.
+
+### Prediction for assignment
+
+We predict classe for file pml_test.csv and save results in separate files folder "Results".
+
+```{r}
+
+answers = as.character(predict(res_train,newdata = pml_test))
+  
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("results/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+} 
+pml_write_files(answers)
+```
+
+After submitting this results I have 1 error from 20 problems. Not perfect but acceptable.
+
+**Thank you for you attention.**
